@@ -3,45 +3,50 @@ import pandas as pd
 import numpy as np
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-import json
 import requests
-import ast
 
 app = Flask(__name__)
 
 # Load and preprocess the data
 def load_data():
-    df = pd.read_csv('tmdb_5000_movies.csv')
-    df['genres'] = df['genres'].apply(lambda x: [i['name'] for i in ast.literal_eval(x)])
+    df = pd.read_csv('Cleaned_Movies.csv')
     return df
 
-# Create genre string for vectorization
-def create_genre_string(genres):
-    return ' '.join(genres)
-
-# Compute similarity matrix
+# Compute similarity matrix using tags
 def compute_similarity():
     df = load_data()
-    df['genre_string'] = df['genres'].apply(create_genre_string)
-    count = CountVectorizer()
-    count_matrix = count.fit_transform(df['genre_string'])
+    # Create count matrix from tags
+    count = CountVectorizer(stop_words='english')
+    count_matrix = count.fit_transform(df['tags'])
+    
+    # Compute cosine similarity
     cosine_sim = cosine_similarity(count_matrix, count_matrix)
     return df, cosine_sim
 
 # Get movie recommendations
 def get_recommendations(title, df, cosine_sim):
+    # Get the index of the movie
     idx = df[df['title'] == title].index[0]
+    
+    # Get similarity scores for all movies
     sim_scores = list(enumerate(cosine_sim[idx]))
+    
+    # Sort movies based on similarity scores
     sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
-    sim_scores = sim_scores[1:9]  # Changed from 6 to 9 to get top 8 similar movies
+    
+    # Get top 8 similar movies (excluding the movie itself)
+    sim_scores = sim_scores[1:9]
+    
+    # Get movie indices and titles
     movie_indices = [i[0] for i in sim_scores]
-    return df['title'].iloc[movie_indices].tolist()
+    recommended_movies = df.iloc[movie_indices][['title', 'movie_id']].to_dict('records')
+    return recommended_movies
 
 # Initialize data
 df, cosine_sim = compute_similarity()
 
 # OMDb API Configuration
-OMDB_API_KEY = '3cf62584'  # Replace with your OMDb API key
+OMDB_API_KEY = '3cf62584'
 OMDB_BASE_URL = 'http://www.omdbapi.com/'
 
 @app.route('/')
@@ -56,10 +61,10 @@ def recommend():
     
     # Fetch movie posters
     movies_with_posters = []
-    for title in recommendations:
+    for movie in recommendations:
         response = requests.get(OMDB_BASE_URL, params={
             'apikey': OMDB_API_KEY,
-            't': title
+            't': movie['title']
         })
         
         if response.status_code == 200:
@@ -67,8 +72,9 @@ def recommend():
             if movie_data['Response'] == 'True':
                 poster_url = movie_data.get('Poster', 'N/A')
                 movies_with_posters.append({
-                    'title': title,
-                    'poster_url': poster_url
+                    'title': movie['title'],
+                    'poster_url': poster_url,
+                    'movie_id': movie['movie_id']
                 })
     
     return jsonify(movies_with_posters)
